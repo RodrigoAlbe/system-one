@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import time
 import os
+import sys
 import asyncio
 from typing import Any, Dict, List, Optional, Union
 import httpx
@@ -18,6 +19,22 @@ from .primitives import (
     EvaluationMetrics,
     EvaluationResponse,
 )
+
+
+def _get_env(var_name: str) -> str:
+    """Gets environment variable with Windows Registry fallback for new sessions."""
+    val = os.environ.get(var_name, "")
+    if val:
+        return val.strip()
+    if sys.platform == "win32":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as key:
+                reg_val, _ = winreg.QueryValueEx(key, var_name)
+                return str(reg_val).strip()
+        except Exception:
+            pass
+    return ""
 
 
 class SystemOneClient:
@@ -40,19 +57,19 @@ class SystemOneClient:
         self.max_retries = max_retries
 
         if self.provider == "gemini":
-            raw_key = api_key or os.environ.get("GEMINI_API_KEY", "")
+            raw_key = api_key or _get_env("GEMINI_API_KEY")
             self.api_key = raw_key.strip()
             self.model = model or "gemini-3-flash-preview"
             self.base_url = base_url or "https://generativelanguage.googleapis.com/v1beta/models"
 
         elif self.provider == "groq":
-            raw_key = api_key or os.environ.get("GROQ_API_KEY", "")
+            raw_key = api_key or _get_env("GROQ_API_KEY")
             self.api_key = raw_key.strip()
             self.model = model or "llama-3.3-70b-versatile"
             self.base_url = base_url or "https://api.groq.com/openai/v1"
 
         elif self.provider == "openai":
-            raw_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+            raw_key = api_key or _get_env("OPENAI_API_KEY")
             self.api_key = raw_key.strip()
             self.model = model or "gpt-4o-mini"
             self.base_url = base_url or "https://api.openai.com/v1"
@@ -66,11 +83,11 @@ class SystemOneClient:
             raise ValueError(f"Provedor não suportado: {self.provider}. Use 'gemini', 'groq', 'openai' ou 'ollama'.")
 
     def _detect_provider(self) -> str:
-        if os.environ.get("GEMINI_API_KEY"):
+        if _get_env("GEMINI_API_KEY"):
             return "gemini"
-        if os.environ.get("GROQ_API_KEY"):
+        if _get_env("GROQ_API_KEY"):
             return "groq"
-        if os.environ.get("OPENAI_API_KEY"):
+        if _get_env("OPENAI_API_KEY"):
             return "openai"
         return "gemini"
 

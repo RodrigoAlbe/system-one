@@ -40,13 +40,13 @@ Real benchmark evaluated across multi-question batching (support routing, fraud 
 ### 1. As an AI Agent Skill (Antigravity, Cursor, Codex, etc.)
 Install into your agent workspace or globally via [skills.sh](https://skills.sh):
 ```bash
-npx skills add your-username/system-one --global
+npx skills add RodrigoAlbe/system-one --global
 ```
 
 ### 2. In Claude Code
 Install as an official Claude Code plugin:
 ```bash
-claude plugin marketplace add your-username/system-one
+claude plugin marketplace add RodrigoAlbe/system-one
 claude plugin install system-one
 ```
 

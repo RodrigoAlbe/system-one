@@ -1,0 +1,11 @@
+{
+  "name": "system-one",
+  "plugins": [
+    {
+      "name": "system-one",
+      "version": "1.0.0",
+      "description": "System One decision engine: typed probabilistic choices, scores, and guardrails without chat prose.",
+      "skills": ["skills/system-one"]
+    }
+  ]
+}

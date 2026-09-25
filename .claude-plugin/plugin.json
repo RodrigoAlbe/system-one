@@ -1,0 +1,8 @@
+{
+  "name": "system-one",
+  "version": "1.0.0",
+  "description": "High-speed, zero-cost System One decision engine powered by Google Gemini (Free Tier), Groq & Ollama. Strict typed decisions (Choice, Noul, Score) without chat prose.",
+  "author": "Rodrigo",
+  "license": "MIT",
+  "repository": "https://github.com/your-username/system-one"
+}

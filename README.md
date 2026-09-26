@@ -9,16 +9,21 @@ that a classification is correct.
 
 ## Installation
 
-From a checkout:
+Install from GitHub (requires Git and Python 3.9+):
 
 ```bash
-pip install -e .
+python -m pip install "git+https://github.com/RodrigoAlbe/system-one.git"
 ```
 
-For the published package (check its version before relying on changes on `main`):
+There is currently no public PyPI release. The GitHub command installs `main`;
+append `@<commit-sha>` to the URL to pin a particular revision.
+
+For development, install from a checkout:
 
 ```bash
-pip install system-one-native
+git clone https://github.com/RodrigoAlbe/system-one.git
+cd system-one
+python -m pip install -e .
 ```
 
 Agent skill:
@@ -31,7 +36,15 @@ Claude Code plugin:
 
 ```bash
 claude plugin marketplace add RodrigoAlbe/system-one
-claude plugin install system-one
+claude plugin install system-one@system-one
+```
+
+The skill/plugin installs agent instructions. Install the Python library separately
+when you want to execute those examples. Maintainers can validate both manifests:
+
+```bash
+claude plugin validate --strict .claude-plugin/marketplace.json
+claude plugin validate --strict .claude-plugin/plugin.json
 ```
 
 ## Quickstart
@@ -52,7 +65,7 @@ response = client.evaluate(
 )
 print(response.answers["department"].value)
 print(response.answers["urgent"].value)  # Model-estimated number in [0, 1]
-print(response.metrics.output_tokens)
+print(response.metrics.output_tokens)  # None if the provider omitted usage
 print(response.metrics.estimated_cost_usd)  # None: unknown, not zero
 ```
 
@@ -166,6 +179,14 @@ successful-request latency p50/p95 (nearest-rank p95). Latency includes retries.
 Token totals cover successful responses only; failed requests may consume tokens.
 Cost remains unknown. No competitor or savings figures are fabricated.
 
+Token fields are `None` (JSON `null`) when missing or null in a provider response;
+an explicit zero remains zero. Each `successful_*_tokens` total is only populated
+when every successful response reported that field. Otherwise it is null.
+`reported_*_tokens` sums the available measurements and is null when none exist.
+`token_usage_coverage` reports measured/missing response counts and the fraction
+covered per field, using successful responses as the denominator. With no successful
+responses, totals and coverage fractions are null.
+
 A labeled dataset is a JSON array. Each case needs a unique `id`, `state`,
 `questions`, and an `expected` label for every question:
 
@@ -195,6 +216,8 @@ is still needed before claiming real-world quality or calibrated confidence.
 - Logprobs are disabled by default and no longer rewrite values or confidence.
 - Unsupported diagnostic logprob requests fail before network access.
 - `estimated_cost_usd` is now optional and returns `None` when unknown.
+- `input_tokens`, `output_tokens`, and `total_tokens` are optional too; missing
+  usage is no longer recorded as zero. Benchmark totals include coverage metadata.
 - Empty/duplicate options and invalid question definitions are rejected locally.
 - Multi-position logprob extraction requires an explicit token position.
 
@@ -204,7 +227,20 @@ is still needed before claiming real-world quality or calibrated confidence.
 system-one noul "Customer requests a refund" "Is the customer requesting a refund?"
 system-one choice "Server CPU at 99%" "Action" Scale Restart Ignore
 system-one score "Database disk at 92%" "Severity" Low Medium High Critical
+system-one --provider ollama --model qwen2.5:7b --json choice "Payment failed" "Department" Billing Support
 ```
+
+`choice` and `score` require instructions followed by at least one explicit
+option/level. They never supply placeholder options. `noul` accepts optional
+instructions and rejects extra options. Run `system-one --help` for usage.
+`--provider`, `--model`, and `--json` can appear before or after positional arguments.
+Credentials come from the provider environment variables described above.
+
+With `--json`, stdout contains `answers` (the single question ID is `q`) and
+`metrics`; it excludes raw provider data. Successful runs exit 0. Invalid command
+arguments exit 2 with argparse diagnostics on stderr. Evaluation/configuration
+failures exit 1 with a short error on stderr (a JSON `error` object when `--json`
+is set), leaving stdout empty.
 
 ## License
 

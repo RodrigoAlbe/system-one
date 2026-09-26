@@ -88,6 +88,9 @@ def test_all_failed_run_has_no_fabricated_metrics():
     assert report["noul_brier_score"] is None
     assert report["accuracy_on_valid_answers"] is None
     assert report["correct_over_attempted_labels"] == 0
+    assert report["successful_total_tokens"] is None
+    assert report["reported_total_tokens"] is None
+    assert report["token_usage_coverage"]["total_tokens"]["fraction"] is None
 
 
 def test_unlabeled_smoke_cases_do_not_claim_accuracy():
@@ -124,3 +127,37 @@ def test_invalid_datasets_rejected(tmp_path, data):
     path.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(ValueError):
         load_cases(path)
+
+
+def test_partial_usage_does_not_undercount_as_a_complete_total():
+    first, second = result(1), result(2)
+    second.metrics.input_tokens = None
+    second.metrics.total_tokens = None
+    report = run_benchmark(client([first, second]), cases(), repeats=2)
+    assert report["successful_input_tokens"] is None
+    assert report["successful_total_tokens"] is None
+    assert report["reported_input_tokens"] == 10
+    assert report["reported_total_tokens"] == 15
+    assert report["successful_output_tokens"] == 10
+    assert report["token_usage_coverage"]["input_tokens"] == {
+        "reported_responses": 1,
+        "missing_responses": 1,
+        "fraction": 0.5,
+    }
+    assert report["token_usage_coverage"]["output_tokens"]["fraction"] == 1
+    assert report["records"][1]["metrics"]["input_tokens"] is None
+
+
+@pytest.mark.parametrize("value", [None, 0])
+def test_unknown_usage_and_measured_zero_are_not_conflated(value):
+    response = result(1)
+    response.metrics.input_tokens = value
+    response.metrics.output_tokens = value
+    response.metrics.total_tokens = value
+    report = run_benchmark(client([response]), cases())
+    assert report["successful_total_tokens"] == value
+    assert report["reported_total_tokens"] == value
+    assert report["token_usage_coverage"]["total_tokens"]["fraction"] == (
+        0 if value is None else 1
+    )
+    json.dumps(report, allow_nan=False)

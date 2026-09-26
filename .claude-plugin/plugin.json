@@ -1,8 +1,10 @@
 {
   "name": "system-one",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Structured AI decisions with multiple providers and local response validation.",
-  "author": "Rodrigo Albe",
+  "author": {
+    "name": "Rodrigo Albe"
+  },
   "license": "MIT",
   "repository": "https://github.com/RodrigoAlbe/system-one"
 }

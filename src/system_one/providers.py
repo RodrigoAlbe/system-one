@@ -105,7 +105,7 @@ def extract_content(provider, data):
                 for part in parts
                 if not part.get("thought") and "text" in part
             )
-            usage = data.get("usageMetadata") or {}
+            usage = data.get("usageMetadata")
             fields = ("promptTokenCount", "candidatesTokenCount", "totalTokenCount")
         else:
             choice = data["choices"][0]
@@ -118,13 +118,20 @@ def extract_content(provider, data):
             if choice.get("finish_reason") not in (None, "stop"):
                 raise IncompleteResponseError("Provider did not finish a text response")
             content = message["content"]
-            usage = data.get("usage") or {}
+            usage = data.get("usage")
             fields = ("prompt_tokens", "completion_tokens", "total_tokens")
+        if usage is None:
+            usage = {}
         if not isinstance(usage, dict):
             raise InvalidResponseError("Token usage must be an object")
-        counts = tuple(usage.get(field, 0) for field in fields)
-        if any(type(count) is not int or count < 0 for count in counts):
-            raise InvalidResponseError("Token counts must be non-negative integers")
+        counts = tuple(usage.get(field) for field in fields)
+        if any(
+            count is not None and (type(count) is not int or count < 0)
+            for count in counts
+        ):
+            raise InvalidResponseError(
+                "Token counts must be non-negative integers or null"
+            )
         return content, counts
     except (KeyError, IndexError, TypeError, AttributeError) as exc:
         raise InvalidResponseError("Malformed provider response envelope") from exc

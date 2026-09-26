@@ -118,6 +118,25 @@ asyncio.run(main())
 
 ---
 
+## 🎲 Logprobs & Probability Calibration
+
+When using logprob-enabled providers (`groq`, `openai`, `ollama`), System One extracts token-level log probabilities to compute real mathematical distributions:
+
+* **True Softmax Distribution**: Evaluates $P(x_i) = \frac{e^{\text{logp}_i}}{\sum_j e^{\text{logp}_j}}$ over candidate tokens.
+* **Shannon Entropy Confidence**: Confidence is calculated as $1.0 - \frac{\mathcal{H}}{\mathcal{H}_{\max}}$, dropping to $0.0$ on complete uncertainty/split decisions and $1.0$ on unanimous consensus.
+* **Inspectable `raw_distribution`**: Access the exact probability breakdown across all options:
+
+```python
+res = client.evaluate(state, {"dept": Choice("Department:", ["DevOps", "Billing", "Frontend"])})
+ans = res.answers["dept"]
+
+print(ans.value)             # "DevOps"
+print(ans.confidence)        # 0.94
+print(ans.raw_distribution)  # {"DevOps": 0.892, "Billing": 0.071, "Frontend": 0.037}
+```
+
+---
+
 ## 🔌 Supported Providers
 
 System One auto-detects your provider based on your environment variables:

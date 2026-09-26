@@ -19,6 +19,12 @@ from .primitives import (
     EvaluationMetrics,
     EvaluationResponse,
 )
+from .logprobs import (
+    softmax,
+    entropy_confidence,
+    extract_openai_logprobs,
+    extract_gemini_logprobs,
+)
 
 
 def _get_env(var_name: str) -> str:
@@ -51,15 +57,17 @@ class SystemOneClient:
         base_url: Optional[str] = None,
         timeout: float = 35.0,
         max_retries: int = 3,
+        use_logprobs: bool = True,
     ):
         self.provider = (provider or self._detect_provider()).lower()
         self.timeout = timeout
         self.max_retries = max_retries
+        self.use_logprobs = use_logprobs
 
         if self.provider == "gemini":
             raw_key = api_key or _get_env("GEMINI_API_KEY")
             self.api_key = raw_key.strip()
-            self.model = model or "gemini-3-flash-preview"
+            self.model = model or "gemini-3.1-flash-lite"
             self.base_url = base_url or "https://generativelanguage.googleapis.com/v1beta/models"
 
         elif self.provider == "groq":
@@ -226,6 +234,9 @@ Evaluate the following STATE strictly against each QUESTION, outputting calibrat
                     {"role": "user", "content": prompt},
                 ],
             }
+            if self.use_logprobs:
+                payload["logprobs"] = True
+                payload["top_logprobs"] = 5
 
         return url, headers, payload
 
@@ -241,28 +252,57 @@ Evaluate the following STATE strictly against each QUESTION, outputting calibrat
             candidates_tokens = usage.get("candidatesTokenCount", 0)
             total_tokens = usage.get("totalTokenCount", 0)
             content_text = data["candidates"][0]["content"]["parts"][0]["text"]
+            logprobs_map = extract_gemini_logprobs(data["candidates"][0])
         else:
             usage = data.get("usage", {})
             prompt_tokens = usage.get("prompt_tokens", 0)
             candidates_tokens = usage.get("completion_tokens", 0)
             total_tokens = usage.get("total_tokens", 0)
-            content_text = data["choices"][0]["message"]["content"]
+            choice_item = data.get("choices", [{}])[0]
+            content_text = choice_item.get("message", {}).get("content", "{}")
+            logprobs_map = extract_openai_logprobs(choice_item)
 
         parsed_answers = json.loads(content_text)
 
         answers: Dict[str, QuestionResult] = {}
         for q_id, q in questions.items():
             ans_data = parsed_answers.get(q_id, {})
-            if isinstance(ans_data, dict):
-                conf = float(ans_data.get("confidence", 1.0))
-                if q.type == "noul":
-                    val = float(ans_data.get("probability", 0.0))
-                elif q.type == "choice":
-                    val = str(ans_data.get("selected", ""))
-                elif q.type == "score":
-                    val = str(ans_data.get("level", ""))
+            raw_dist = None
+
+            if q.type == "choice":
+                matched_logprobs = {opt: logprobs_map[opt] for opt in q.options if opt in logprobs_map}
+                if len(matched_logprobs) >= 1:
+                    raw_dist = softmax(matched_logprobs)
+                    val = max(raw_dist, key=raw_dist.get)
+                    conf = entropy_confidence(raw_dist) if len(raw_dist) > 1 else 1.0
                 else:
-                    val = ans_data
+                    val = str(ans_data.get("selected", "")) if isinstance(ans_data, dict) else str(ans_data)
+                    conf = float(ans_data.get("confidence", 1.0)) if isinstance(ans_data, dict) else 1.0
+
+            elif q.type == "noul":
+                matched_bool = {k: v for k, v in logprobs_map.items() if k.lower() in ("true", "false", "yes", "no", "1", "0")}
+                if any(k.lower() in ("true", "yes", "1") for k in matched_bool) and any(k.lower() in ("false", "no", "0") for k in matched_bool):
+                    p_map = softmax(matched_bool)
+                    p_true = sum(p for k, p in p_map.items() if k.lower() in ("true", "yes", "1"))
+                    p_false = sum(p for k, p in p_map.items() if k.lower() in ("false", "no", "0"))
+                    total = p_true + p_false
+                    norm_true = round(p_true / total, 4) if total > 0 else 0.5
+                    raw_dist = {"true": norm_true, "false": round(1.0 - norm_true, 4)}
+                    val = norm_true
+                    conf = entropy_confidence(raw_dist)
+                else:
+                    val = float(ans_data.get("probability", 0.0)) if isinstance(ans_data, dict) else float(ans_data)
+                    conf = float(ans_data.get("confidence", 1.0)) if isinstance(ans_data, dict) else 1.0
+
+            elif q.type == "score":
+                matched_logprobs = {lvl: logprobs_map[lvl] for lvl in q.levels if lvl in logprobs_map}
+                if len(matched_logprobs) >= 1:
+                    raw_dist = softmax(matched_logprobs)
+                    val = max(raw_dist, key=raw_dist.get)
+                    conf = entropy_confidence(raw_dist) if len(raw_dist) > 1 else 1.0
+                else:
+                    val = str(ans_data.get("level", "")) if isinstance(ans_data, dict) else str(ans_data)
+                    conf = float(ans_data.get("confidence", 1.0)) if isinstance(ans_data, dict) else 1.0
             else:
                 val = ans_data
                 conf = 1.0
@@ -272,6 +312,7 @@ Evaluate the following STATE strictly against each QUESTION, outputting calibrat
                 question_type=q.type,
                 value=val,
                 confidence=conf,
+                raw_distribution=raw_dist,
             )
 
         metrics = EvaluationMetrics(

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "system-one-native"
-version = "1.0.0"
+version = "1.1.0"
 description = "Native System One decision engine powered by Google Gemini (Free Tier), Groq & Ollama with strict JSON Schema."
 readme = "README.md"
 authors = [

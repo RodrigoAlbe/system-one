@@ -12,8 +12,9 @@ from .primitives import (
     EvaluationResponse,
 )
 from .client import SystemOneClient
+from .logprobs import softmax, entropy_confidence
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __all__ = [
     "SystemOneClient",
     "Choice",
@@ -22,4 +23,7 @@ __all__ = [
     "QuestionResult",
     "EvaluationMetrics",
     "EvaluationResponse",
+    "softmax",
+    "entropy_confidence",
 ]
+

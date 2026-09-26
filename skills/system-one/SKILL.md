@@ -2,25 +2,22 @@
 name: system-one
 license: MIT
 description: >
-  Build high-speed, zero-cost AI-powered decisions with System One: structured,
-  calibrated judgments that software can use directly like programming primitives.
-  Drop-in open-source alternative to TypeSafe Jev powered by Google Gemini (Free Tier),
-  Groq, or local Ollama with strict JSON Schema output. Use whenever a workflow needs
-  intent routing, classification, guardrail verification (boolean yes/no), risk scoring,
-  or triage instead of expensive, verbose chat LLM pipelines.
+  Build structured AI decisions with System One: model-estimated choices,
+  probabilities, and scores validated locally. Supports Gemini, Groq, OpenAI,
+  and local Ollama for routing, classification, and triage.
 ---
 
 # Build with System One Native
 
 System One makes units of AI intelligence usable like programming primitives: small,
-calibrated judgments you can compose into larger capabilities without generating chat prose.
+validated outputs you can compose into larger capabilities without generating chat prose.
 
 ## Core Primitives
 
 | Primitive | Use Case | Returns |
 | :--- | :--- | :--- |
 | **`Choice(options, instructions)`** | Pick one option from a defined set | Selected option string (`selected`) with confidence score (`0.0` - `1.0`) |
-| **`Noul(instructions)`** | Check if a condition holds (yes/no) | Calibrated probability float (`0.0` - `1.0`) |
+| **`Noul(instructions)`** | Check if a condition holds (yes/no) | Model-estimated probability float (`0.0` - `1.0`) |
 | **`Score(levels, instructions)`** | Degree along an ordered scale | Assigned tier string (`level`) with confidence score |
 
 ---
@@ -28,7 +25,7 @@ calibrated judgments you can compose into larger capabilities without generating
 ## Usage in Code
 
 ### 1. Multi-Question Batch Evaluation (1 Single Request)
-When you have multiple questions about the same `state`, **always evaluate them together**. They run in parallel in a single LLM call, saving ~90% tokens:
+When you have multiple questions about the same `state`, evaluate them together when appropriate. They share one LLM request; measure token savings for your workload:
 
 ```python
 from system_one import SystemOneClient, Choice, Noul, Score
@@ -91,10 +88,10 @@ asyncio.run(check())
 
 System One auto-detects your provider based on available environment variables:
 
-1. **Google Gemini (Default, Free Tier):**
-   * Set `GEMINI_API_KEY="your_key"` (free at https://aistudio.google.com/apikey).
-   * Models: `gemini-3-flash-preview`, `gemini-flash-latest`.
-2. **Groq Cloud (Sub-200ms latency):**
+1. **Google Gemini (Default):**
+   * Set `GEMINI_API_KEY="your_key"` (available at https://aistudio.google.com/apikey; quotas and billing vary).
+   * Models: `gemini-3.1-flash-lite` (default).
+2. **Groq Cloud:**
    * Set `GROQ_API_KEY="gsk_..."`.
    * Models: `llama-3.3-70b-versatile`, `llama-3.1-8b-instant`.
 3. **Local Ollama (Offline, zero API keys):**
@@ -102,3 +99,14 @@ System One auto-detects your provider based on available environment variables:
    * Initialize: `client = SystemOneClient(provider="ollama")`.
 
 See [cookbooks](./references/cookbooks.md) for complete architectural patterns.
+
+
+## Reliability contract
+
+Catch `InvalidResponseError` for malformed, missing, refused, or truncated answers;
+route those cases to review instead of assuming a negative result. Catch
+`ProviderError` for transport/HTTP failures. Confidence is model-reported and is
+not calibrated. Logprobs are disabled by default and never overwrite answers.
+Unknown cost is `None`. Native schema support depends on provider and model;
+local validation always runs. See the repository README for provider modes and
+migration notes. Thresholds in examples are illustrative, not validated policy.

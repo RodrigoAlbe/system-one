@@ -1,183 +1,211 @@
-# ⚡ System One Native
+# System One Native
 
-> **High-speed, zero-cost, typed AI decisions as programming primitives.**  
-> A drop-in open-source alternative to TypeSafe Jev powered by Google Gemini (Free Tier), Groq & Ollama with strict JSON Schema.
+Structured AI decisions with multiple providers and local response validation.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Skills.sh](https://img.shields.io/badge/skills.sh-agent--ready-green.svg)](https://skills.sh)
-[![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-purple.svg)](https://claude.ai)
+Use `Choice`, `Noul`, and `Score` to classify application state without parsing chat
+prose. Evaluate several questions in one request with Gemini, Groq, OpenAI, or a
+local Ollama server. Decisions remain probabilistic: valid JSON does not guarantee
+that a classification is correct.
 
----
+## Installation
 
-## 🎯 What is System One?
+From a checkout:
 
-Instead of generating free-form conversational text, **System One** treats AI like deterministic software primitives:
-* **`Choice`**: Picks one option from a defined set with calibrated confidence.
-* **`Noul`**: Returns a boolean probability float ($0.0 \dots 1.0$) for yes/no conditions.
-* **`Score`**: Assigns a position along an ordered scale (e.g. `['Low', 'Medium', 'High']`).
+```bash
+pip install -e .
+```
 
-**Result:** Zero markdown parsing, zero regex, 90% fewer output tokens, sub-second decisions, and $0 cost on free-tier providers.
+For the published package (check its version before relying on changes on `main`):
 
----
+```bash
+pip install system-one-native
+```
 
-## 📊 Live Benchmark & Consumption Report
+Agent skill:
 
-Real benchmark evaluated across multi-question batching (support routing, fraud guardrail, lead triage):
-
-| Metric | Traditional Chat LLM | **System One Native (Gemini / Groq)** | Jev (TypeSafe AI) |
-| :--- | :--- | :--- | :--- |
-| **Output Tokens** (per 3-decision batch) | ~400 – 800 tokens | **~58 tokens (90% reduction)** | 0 tokens (unmetered) |
-| **Parsing Failure Rate** | High (markdown fences, conversational fluff) | **0% (Enforced by Strict JSON Schema)** | 0% (Typed native) |
-| **Free Tier** | Varies / None | **100% Free** (Google AI Studio Free Tier / Ollama) | ❌ No Free Tier (HTTP 402) |
-| **Projected Cost** (100k decisions) | ~$12.50 – $25.00 USD | **$0.00** (Free Tier) or ~$1.60 (Paid) | ~$0.35 USD (paid only) |
-| **Local / Offline Mode** | Requires heavy setup | **✅ Supported via Ollama** | ❌ Cloud proprietary only |
-
----
-
-## 🚀 Installation
-
-### 1. As an AI Agent Skill (Antigravity, Cursor, Codex, etc.)
-Install into your agent workspace or globally via [skills.sh](https://skills.sh):
 ```bash
 npx skills add RodrigoAlbe/system-one --global
 ```
 
-### 2. In Claude Code
-Install as an official Claude Code plugin:
+Claude Code plugin:
+
 ```bash
 claude plugin marketplace add RodrigoAlbe/system-one
 claude plugin install system-one
 ```
 
-### 3. In Any Python Project
-```bash
-pip install system-one-native
-```
-*(Or install locally in editable mode: `pip install -e .`)*
+## Quickstart
 
----
-
-## 💻 Quickstart
-
-### 1. Batch Parallel Decisions (Recommended)
-Ask multiple questions over the same state in **one single request**:
+Set `GEMINI_API_KEY`, or select a different provider explicitly.
 
 ```python
 from system_one import SystemOneClient, Choice, Noul, Score
 
-client = SystemOneClient()
-
-state = {
-    "ticket_id": "TCK-9921",
-    "message": "Payment gateway returning 500 error on checkout for all users!",
-    "user_plan": "Enterprise"
-}
-
+client = SystemOneClient(provider="gemini")
 response = client.evaluate(
-    state=state,
+    state={"message": "Payment gateway returning 500 errors", "plan": "Enterprise"},
     questions={
-        "dept": Choice(instructions="Routing department:", options=["Backend", "Billing", "DevOps"]),
-        "is_urgent": Noul(instructions="Does this represent an active revenue-impacting outage?"),
-        "severity": Score(instructions="Operational severity level:", levels=["P1", "P2", "P3", "P4"])
-    }
+        "department": Choice(options=["Backend", "Billing", "DevOps"], instructions="Routing department"),
+        "urgent": Noul(instructions="Is there an active revenue-impacting outage?"),
+        "severity": Score(levels=["P1", "P2", "P3", "P4"], instructions="Operational severity"),
+    },
 )
-
-print(response.answers["dept"].value)        # "Backend" (confidence: 0.95)
-print(response.answers["is_urgent"].value)   # 1.0 (float probability)
-print(response.answers["severity"].value)    # "P1" (confidence: 1.0)
-print(f"Output tokens: {response.metrics.output_tokens}") # ~55 tokens!
+print(response.answers["department"].value)
+print(response.answers["urgent"].value)  # Model-estimated number in [0, 1]
+print(response.metrics.output_tokens)
+print(response.metrics.estimated_cost_usd)  # None: unknown, not zero
 ```
 
-### 2. One-Liner Shortcuts
-```python
-client = SystemOneClient()
+Keyword arguments avoid confusion: positional constructors are
+`Choice(options, instructions)` and `Score(levels, instructions)`.
 
-# Boolean check (returns float 0.0 - 1.0)
-is_spam = client.noul(email_text, "Is this message unsolicited spam?")
-
-# Categorical choice (returns selected string)
-category = client.choice(customer_feedback, "Sentiment", ["Positive", "Neutral", "Negative"])
-
-# Score (returns level string)
-priority = client.score(task_desc, "Priority", ["Low", "Normal", "Critical"])
-```
-
-### 3. Async / Non-Blocking (FastAPI, Telegram/Discord Bots)
-```python
-import asyncio
-from system_one import SystemOneClient, Noul
-
-async def main():
-    client = SystemOneClient()
-    res = await client.evaluate_async("log payload", {"alert": Noul("Requires immediate page?")})
-    print(res.answers["alert"].value)
-
-asyncio.run(main())
-```
-
----
-
-## 🎲 Logprobs & Probability Calibration
-
-When using logprob-enabled providers (`groq`, `openai`, `ollama`), System One extracts token-level log probabilities to compute real mathematical distributions:
-
-* **True Softmax Distribution**: Evaluates $P(x_i) = \frac{e^{\text{logp}_i}}{\sum_j e^{\text{logp}_j}}$ over candidate tokens.
-* **Shannon Entropy Confidence**: Confidence is calculated as $1.0 - \frac{\mathcal{H}}{\mathcal{H}_{\max}}$, dropping to $0.0$ on complete uncertainty/split decisions and $1.0$ on unanimous consensus.
-* **Inspectable `raw_distribution`**: Access the exact probability breakdown across all options:
+Convenience methods and async evaluation use the same validation:
 
 ```python
-res = client.evaluate(state, {"dept": Choice("Department:", ["DevOps", "Billing", "Frontend"])})
-ans = res.answers["dept"]
+category = client.choice("I love it", "Sentiment", ["Positive", "Neutral", "Negative"])
+probability = client.noul("Unsolicited sales email", "Is this spam?")
+priority = client.score("Disk almost full", "Severity", ["Low", "Medium", "High"])
 
-print(ans.value)             # "DevOps"
-print(ans.confidence)        # 0.94
-print(ans.raw_distribution)  # {"DevOps": 0.892, "Billing": 0.071, "Frontend": 0.037}
+# Inside an async function:
+# response = await client.evaluate_async("log payload", {"alert": Noul("Page on-call?")})
 ```
 
----
+## Validation and failure handling
 
-## 🔌 Supported Providers
+Every answer must contain exactly the expected fields. Missing/extra question
+IDs, duplicate JSON keys, out-of-range values, booleans masquerading as numbers,
+unknown options, non-finite numbers, and malformed JSON raise
+`InvalidResponseError`. A batch is atomic: no partial result is returned.
+Question options/levels must be non-empty lists of unique, non-empty strings.
 
-System One auto-detects your provider based on your environment variables:
-
-| Provider | Environment Variable | Default Model | Notes |
-| :--- | :--- | :--- | :--- |
-| **Google Gemini (Default)** | `GEMINI_API_KEY` | `gemini-3-flash-preview` | 100% Free Tier via Google AI Studio |
-| **Groq Cloud** | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | Ultra-fast inference (~150ms) |
-| **OpenAI** | `OPENAI_API_KEY` | `gpt-4o-mini` | Standard structured outputs |
-| **Ollama** | None (Localhost) | `qwen2.5:7b` | Fully offline, zero data leaves machine |
-
-Explicitly select a provider:
 ```python
-client = SystemOneClient(provider="groq")   # or "gemini", "ollama", "openai"
+from system_one import InvalidResponseError, ProviderError
+
+try:
+    result = client.evaluate("message", {"urgent": Noul("Is this urgent?")})
+except InvalidResponseError:
+    print("No usable decision: send to manual review")
+except ProviderError:
+    print("Provider unavailable: queue for a later attempt")
+else:
+    print(result.answers["urgent"].value)
 ```
 
----
+`ProviderRefusalError` and `IncompleteResponseError` are subclasses of
+`InvalidResponseError`. Refused or truncated responses never become default
+negative answers. Invalid responses are not automatically retried.
 
-## 🛠️ CLI Usage
+HTTP 408/429/500/502/503/504 and transport failures are retried with backoff,
+respecting `Retry-After`. `max_retries=3` retains its historical meaning of **three
+total attempts**. `timeout` is an HTTP operation timeout, not a total deadline;
+retries and provider-requested waits can increase overall latency.
 
-You can also run quick decisions directly in your terminal:
+## Providers and response formats
+
+| Provider | Environment variable | Default model | Automatic response mode |
+| --- | --- | --- | --- |
+| Gemini | `GEMINI_API_KEY` | `gemini-3.1-flash-lite` | JSON Schema via `responseJsonSchema` |
+| Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | JSON object + schema in prompt |
+| OpenAI | `OPENAI_API_KEY` | `gpt-4o-mini` | Strict JSON Schema |
+| Ollama | None | `qwen2.5:7b` | JSON Schema on the local OpenAI-compatible endpoint |
+
+Auto-detection checks Gemini, Groq, then OpenAI keys. With no key it selects Gemini
+and reports the missing key before making a request. For local inference use
+`SystemOneClient(provider="ollama")` explicitly.
+
+Groq `openai/gpt-oss-20b` and `openai/gpt-oss-120b` use strict schema mode. The known
+OpenAI schema models are `gpt-4o-mini`, `gpt-4o-mini-2024-07-18`, and
+`gpt-4o-2024-08-06`. Other OpenAI/Groq model names conservatively use JSON object
+mode. Both modes include the complete schema in the prompt and validate locally.
+
+For a custom model with verified support, set `response_mode="json_schema"`.
+Use `response_mode="json_object"` for older compatible servers. Overrides do not
+make an unsupported model support a feature; provider errors remain explicit.
+
+Provider contracts: [Gemini API](https://ai.google.dev/api/generate-content#v1beta.GenerationConfig),
+[Groq structured outputs](https://console.groq.com/docs/structured-outputs),
+[OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs),
+[Ollama structured outputs](https://docs.ollama.com/capabilities/structured-outputs).
+Availability, quotas, latency, and billing depend on the provider, model, and account.
+This project does not guarantee free usage or sub-second latency.
+
+## Confidence and diagnostic logprobs
+
+`confidence` and `Noul.value` are **model-reported estimates**, not calibrated
+probabilities of correctness. `confidence_source` is `"model_reported"`.
+`raw_distribution` remains `None`; truncated top-token alternatives cannot establish
+an option-level distribution, especially across multiple questions or tokens.
+
+`use_logprobs=False` is the default. Opt-in requests are supported for OpenAI and
+Ollama endpoints that implement them; data is kept only in `raw_response`.
+Groq and Gemini diagnostic opt-in currently raises `ValueError` locally.
+Token logprobs never overwrite the JSON answer or its reported confidence.
+
+The diagnostic helpers `extract_openai_logprobs` and `extract_gemini_logprobs`
+require `position=` for multi-token responses. They preserve exact token text and
+never pool probabilities across positions. `entropy_confidence` measures
+concentration, not accuracy. Calibrate decision thresholds on independent labeled
+data before using them for automated actions.
+
+## Tests and measured benchmarks
+
 ```bash
-system-one noul "Customer demands immediate refund" "Is this customer angry?"
-system-one choice "Server CPU at 99%" "Action" ScaleRestart Ignore
+pip install -e ".[dev]"
+python -m pytest
+
+# Live calls; requires provider credentials and may incur usage charges:
+python tests/benchmark.py --provider gemini --repeat 5 --output benchmark.json
+python tests/benchmark.py --provider ollama --output local-benchmark.json
+python tests/benchmark.py --provider groq --dataset cases.json --output labeled-benchmark.json
+```
+
+The three bundled scenarios are unlabeled smoke examples, not an accuracy study.
+The report includes model/configuration, timestamp, package/Python versions,
+dataset hash, per-request results, validation/provider failures, token usage, and
+successful-request latency p50/p95 (nearest-rank p95). Latency includes retries.
+Token totals cover successful responses only; failed requests may consume tokens.
+Cost remains unknown. No competitor or savings figures are fabricated.
+
+A labeled dataset is a JSON array. Each case needs a unique `id`, `state`,
+`questions`, and an `expected` label for every question:
+
+```json
+[
+  {
+    "id": "example-only",
+    "state": "The server is unavailable to all users.",
+    "questions": {
+      "outage": {"type": "noul", "instructions": "Is the server unavailable?"}
+    },
+    "expected": {"outage": true}
+  }
+]
+```
+
+Use `options` for choice questions and `levels` for score questions; their labels
+must be one of those strings. Noul labels are booleans. Reports add accuracy on
+valid answers, correct answers over all attempted labels (including failures), and
+Noul Brier score. Noul accuracy uses a 0.5 threshold. Repetitions do not increase
+the number of independent cases. A representative, independently reviewed dataset
+is still needed before claiming real-world quality or calibrated confidence.
+
+## Migration from 1.1.0 behavior
+
+- Invalid or missing answers now raise errors instead of becoming default values.
+- Logprobs are disabled by default and no longer rewrite values or confidence.
+- Unsupported diagnostic logprob requests fail before network access.
+- `estimated_cost_usd` is now optional and returns `None` when unknown.
+- Empty/duplicate options and invalid question definitions are rejected locally.
+- Multi-position logprob extraction requires an explicit token position.
+
+## CLI
+
+```bash
+system-one noul "Customer requests a refund" "Is the customer requesting a refund?"
+system-one choice "Server CPU at 99%" "Action" Scale Restart Ignore
 system-one score "Database disk at 92%" "Severity" Low Medium High Critical
 ```
 
----
+## License
 
-## 🧪 Running Tests & Benchmarks
-
-```bash
-# Run unit tests
-pytest
-
-# Run live benchmark (requires GEMINI_API_KEY)
-python tests/benchmark.py
-```
-
----
-
-## 📄 License
-
-MIT License. Free for commercial and non-commercial use.
+MIT.

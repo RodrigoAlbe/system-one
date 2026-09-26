@@ -1,4 +1,3 @@
-import pytest
 from system_one import SystemOneClient, Choice, Noul, Score
 
 
@@ -8,7 +7,7 @@ def test_schema_generation():
     questions = {
         "cat": Choice(instructions="Category", options=["A", "B"]),
         "flag": Noul(instructions="Is active?"),
-        "lvl": Score(instructions="Level", levels=["1", "2", "3"])
+        "lvl": Score(instructions="Level", levels=["1", "2", "3"]),
     }
 
     schema, prompt = client._build_schema_and_prompt(state, questions)

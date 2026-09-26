@@ -1,20 +1,26 @@
-"""
-Benchmark and Consumption Test Suite for System One Native vs Traditional LLM vs Jev
-"""
+"""Measured smoke benchmark; optional labeled datasets support quality evaluation."""
 
 from __future__ import annotations
-import os
-import sys
-if hasattr(sys.stdout, 'reconfigure'):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    except Exception:
-        pass
+import argparse
+import hashlib
 import json
-import time
-from typing import Dict, Any, List
+import math
+import platform
+import statistics
+from dataclasses import asdict
+from datetime import datetime, timezone
+from pathlib import Path
 
-from system_one import SystemOneClient, Choice, Noul, Score
+from system_one import (
+    SystemOneClient,
+    Choice,
+    Noul,
+    Score,
+    InvalidResponseError,
+    ProviderError,
+    __version__,
+)
+from system_one.validation import validate_questions
 
 
 BENCHMARK_CASES = [
@@ -25,21 +31,26 @@ BENCHMARK_CASES = [
             "ticket_id": "TCK-9921",
             "user_plan": "Enterprise",
             "message": "Nossa API de pagamentos está retornando erro 500 para todos os clientes há 40 minutos! Precisamos de intervenção imediata.",
-            "history": "3 chamados resolvidos este mês"
+            "history": "3 chamados resolvidos este mês",
         },
         "questions": {
             "department": Choice(
                 instructions="Qual departamento deve receber este ticket?",
-                options=["Engenharia_Backend", "Financeiro", "Suporte_Nivel_1", "Vendas"]
+                options=[
+                    "Engenharia_Backend",
+                    "Financeiro",
+                    "Suporte_Nivel_1",
+                    "Vendas",
+                ],
             ),
             "is_critical_outage": Noul(
                 instructions="Representa uma indisponibilidade crítica com impacto de receita?"
             ),
             "severity_level": Score(
                 instructions="Qual o nível de severidade operacional?",
-                levels=["P1_Critico", "P2_Alto", "P3_Medio", "P4_Baixo"]
-            )
-        }
+                levels=["P1_Critico", "P2_Alto", "P3_Medio", "P4_Baixo"],
+            ),
+        },
     },
     {
         "id": "case_2_content_guardrail",
@@ -48,21 +59,26 @@ BENCHMARK_CASES = [
             "transaction_id": "TX-4401",
             "amount": 9500.00,
             "user_account_age_days": 1,
-            "message_note": "Por favor transfira urgente para a conta externa sem checagem de 2FA."
+            "message_note": "Por favor transfira urgente para a conta externa sem checagem de 2FA.",
         },
         "questions": {
             "risk_verdict": Choice(
                 instructions="Decisão de aprovação da transação:",
-                options=["Aprovado", "Revisao_Manual", "Bloqueado_Suspeita_Fraude"]
+                options=["Aprovado", "Revisao_Manual", "Bloqueado_Suspeita_Fraude"],
             ),
             "requires_escalation": Noul(
                 instructions="Requer escalonamento imediato para equipe de risco?"
             ),
             "risk_score": Score(
                 instructions="Nível de risco detectado:",
-                levels=["Risco_Minimo", "Risco_Moderado", "Alto_Risco", "Risco_Critico"]
-            )
-        }
+                levels=[
+                    "Risco_Minimo",
+                    "Risco_Moderado",
+                    "Alto_Risco",
+                    "Risco_Critico",
+                ],
+            ),
+        },
     },
     {
         "id": "case_3_lead_qualification",
@@ -71,90 +87,196 @@ BENCHMARK_CASES = [
             "lead_name": "Tech Corp",
             "company_size": "500-1000",
             "interest": "Estamos avaliando trocar nossa infraestrutura atual por um contrato anual de US$ 50k",
-            "decision_maker": True
+            "decision_maker": True,
         },
         "questions": {
             "lead_tier": Choice(
                 instructions="Classificação do Lead:",
-                options=["Tier_1_Enterprise", "Tier_2_MidMarket", "Tier_3_SMB", "Desqualificado"]
+                options=[
+                    "Tier_1_Enterprise",
+                    "Tier_2_MidMarket",
+                    "Tier_3_SMB",
+                    "Desqualificado",
+                ],
             ),
             "ready_for_demo": Noul(
                 instructions="O lead tem fit imediato para agendamento de demonstração?"
             ),
             "budget_confidence": Score(
                 instructions="Nível de maturidade e clareza de orçamento:",
-                levels=["Sem_Orcamento", "Indefinido", "Viavel", "Confirmado_Alto"]
-            )
-        }
-    }
+                levels=["Sem_Orcamento", "Indefinido", "Viavel", "Confirmado_Alto"],
+            ),
+        },
+    },
 ]
 
 
-def run_benchmark():
-    api_key = os.environ.get("GEMINI_API_KEY")
+def load_cases(path):
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("Dataset must be a non-empty JSON array")
+    factories = {"choice": Choice, "noul": Noul, "score": Score}
+    cases, ids = [], set()
+    for row in raw:
+        if (
+            not isinstance(row, dict)
+            or not {"id", "state", "questions", "expected"} <= row.keys()
+        ):
+            raise ValueError("Each case needs id, state, questions, and expected")
+        if not isinstance(row["id"], str) or not row["id"].strip() or row["id"] in ids:
+            raise ValueError("Case IDs must be unique non-empty strings")
+        ids.add(row["id"])
+        if not isinstance(row["questions"], dict):
+            raise ValueError("questions must be an object")
+        questions = {}
+        for key, definition in row["questions"].items():
+            if not isinstance(definition, dict):
+                raise ValueError("Question definitions must be objects")
+            definition = dict(definition)
+            kind = definition.pop("type", None)
+            if kind not in factories:
+                raise ValueError("Unknown question type")
+            try:
+                questions[key] = factories[kind](**definition)
+            except TypeError as exc:
+                raise ValueError("Invalid question definition") from exc
+        validate_questions(questions)
+        expected = row["expected"]
+        if not isinstance(expected, dict) or set(expected) != set(questions):
+            raise ValueError("expected must label every question exactly once")
+        for key, question in questions.items():
+            label = expected[key]
+            if isinstance(question, Noul):
+                if type(label) is not bool:
+                    raise ValueError("Noul ground truth must be a boolean")
+            else:
+                allowed = (
+                    question.options
+                    if isinstance(question, Choice)
+                    else question.levels
+                )
+                if not isinstance(label, str) or label not in allowed:
+                    raise ValueError("Ground truth must match a permitted option")
+        cases.append({**row, "questions": questions})
+    return cases
 
-    print("\n" + "=" * 70)
-    print("   BENCHMARK E TESTE DE CONSUMO: SYSTEM ONE NATIVO (GEMINI FLASH)")
-    print("=" * 70)
 
-    if not api_key:
-        print("\n[AVISO] GEMINI_API_KEY não foi encontrada nas variáveis de ambiente.")
-        print("Obtenha sua chave gratuita em: https://aistudio.google.com/apikey")
-        return
+def run_benchmark(client, cases=None, repeats=1):
+    if type(repeats) is not int or repeats < 1:
+        raise ValueError("repeats must be a positive integer")
+    cases = BENCHMARK_CASES if cases is None else cases
+    if not cases:
+        raise ValueError("At least one benchmark case is required")
+    serializable = [
+        {**case, "questions": {k: asdict(q) for k, q in case["questions"].items()}}
+        for case in cases
+    ]
+    digest = hashlib.sha256(
+        json.dumps(serializable, sort_keys=True, ensure_ascii=False).encode()
+    ).hexdigest()
+    records, latencies, brier = [], [], []
+    correct, labeled, attempted_labels, valid, invalid, failures = 0, 0, 0, 0, 0, 0
+    input_tokens, output_tokens, total_tokens = 0, 0, 0
+    for repeat in range(repeats):
+        for case in cases:
+            record = {"case_id": case["id"], "repeat": repeat + 1}
+            expected = case.get("expected", {})
+            attempted_labels += len(expected)
+            try:
+                result = client.evaluate(case["state"], case["questions"])
+            except (InvalidResponseError, ProviderError) as exc:
+                invalid += isinstance(exc, InvalidResponseError)
+                failures += isinstance(exc, ProviderError)
+                record.update(status="error", error_type=type(exc).__name__)
+            else:
+                valid += 1
+                latencies.append(result.metrics.latency_ms)
+                input_tokens += result.metrics.input_tokens
+                output_tokens += result.metrics.output_tokens
+                total_tokens += result.metrics.total_tokens
+                record.update(
+                    status="ok",
+                    metrics=asdict(result.metrics),
+                    answers={
+                        key: asdict(answer) for key, answer in result.answers.items()
+                    },
+                )
+                for key, label in expected.items():
+                    value = result.answers[key].value
+                    labeled += 1
+                    if isinstance(case["questions"][key], Noul):
+                        correct += (value >= 0.5) == label
+                        brier.append((value - int(label)) ** 2)
+                    else:
+                        correct += value == label
+            records.append(record)
+    ordered = sorted(latencies)
+    return {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "package_version": __version__,
+        "python_version": platform.python_version(),
+        "provider": client.provider,
+        "model": client.model,
+        "response_mode": client.capabilities.response_mode,
+        "timeout": client.timeout,
+        "max_attempts": client.max_retries,
+        "use_logprobs": client.use_logprobs,
+        "temperature": 0.0,
+        "dataset_sha256": digest,
+        "unique_cases": len(cases),
+        "repeats": repeats,
+        "requests": len(records),
+        "valid_responses": valid,
+        "invalid_responses": invalid,
+        "provider_failures": failures,
+        "invalid_response_rate": invalid / len(records),
+        "successful_latency_p50_ms": statistics.median(ordered) if ordered else None,
+        "successful_latency_p95_ms": ordered[math.ceil(0.95 * len(ordered)) - 1]
+        if ordered
+        else None,
+        "successful_input_tokens": input_tokens,
+        "successful_output_tokens": output_tokens,
+        "successful_total_tokens": total_tokens,
+        "estimated_cost_usd": None,
+        "labeled_answers": labeled,
+        "attempted_labeled_answers": attempted_labels,
+        "accuracy_on_valid_answers": correct / labeled if labeled else None,
+        "correct_over_attempted_labels": correct / attempted_labels
+        if attempted_labels
+        else None,
+        "noul_brier_score": statistics.mean(brier) if brier else None,
+        "records": records,
+    }
 
-    client = SystemOneClient(api_key=api_key)
 
-    total_latency = 0.0
-    total_in_tokens = 0
-    total_out_tokens = 0
-    total_decisions = 0
-    success_count = 0
-
-    print(f"\nRodando {len(BENCHMARK_CASES)} baterias de testes em lote...\n")
-
-    for idx, case in enumerate(BENCHMARK_CASES, start=1):
-        print(f"[{idx}/{len(BENCHMARK_CASES)}] Testando: {case['description']} ({case['id']})")
-        print(f"   Perguntas simultâneas no mesmo State: {len(case['questions'])}")
-
-        try:
-            resp = client.evaluate(state=case["state"], questions=case["questions"])
-            metrics = resp.metrics
-
-            total_latency += metrics.latency_ms
-            total_in_tokens += metrics.input_tokens
-            total_out_tokens += metrics.output_tokens
-            total_decisions += len(case["questions"])
-            success_count += 1
-
-            print(f"   [OK] Latencia: {metrics.latency_ms:.1f}ms | In Tokens: {metrics.input_tokens} | Out Tokens: {metrics.output_tokens}")
-            print("   Decisoes obtidas:")
-            for q_id, ans in resp.answers.items():
-                print(f"     * {q_id}: {ans.value} (confianca: {ans.confidence:.2f})")
-
-        except Exception as e:
-            print(f"   [FAIL] Falha na execucao: {e}")
-
-        print("-" * 70)
-
-    if success_count > 0:
-        avg_latency = total_latency / success_count
-        avg_in_per_batch = total_in_tokens / success_count
-        avg_out_per_batch = total_out_tokens / success_count
-
-        print("\n" + "=" * 70)
-        print("                       RELATORIO DE CONSUMO")
-        print("=" * 70)
-        print(f"* Baterias executadas com sucesso: {success_count}/{len(BENCHMARK_CASES)}")
-        print(f"* Total de decisoes tipadas tomadas: {total_decisions}")
-        print(f"* Latencia media por requisicao (3 decisoes paralelas): {avg_latency:.1f} ms")
-        print(f"* Latencia media amortizada por decisao: {avg_latency / 3:.1f} ms")
-        print(f"* Tokens medios de Entrada por lote: {avg_in_per_batch:.0f} tokens")
-        print(f"* Tokens medios de Saida por lote: {avg_out_per_batch:.0f} tokens (economia de ~90%)")
-        print(f"* Custo no Gemini Free Tier: $0,00 (Gratuito)")
-        print(f"* Custo estimado para 100.000 decisoes no Gemini Flash: ~$1.60 USD")
-        print(f"* Custo LLM Tradicional (Chat com Prosa/CoT): ~$12.50 USD (250x mais caro)")
-        print("=" * 70 + "\n")
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--provider", choices=["gemini", "groq", "openai", "ollama"], default="gemini"
+    )
+    parser.add_argument("--model")
+    parser.add_argument("--dataset", help="JSON array of independently labeled cases")
+    parser.add_argument("--repeat", type=int, default=1)
+    parser.add_argument(
+        "--output", type=Path, help="Write a machine-readable JSON report"
+    )
+    args = parser.parse_args(argv)
+    try:
+        cases = load_cases(args.dataset) if args.dataset else BENCHMARK_CASES
+        report = run_benchmark(
+            SystemOneClient(provider=args.provider, model=args.model),
+            cases,
+            args.repeat,
+        )
+    except (ValueError, OSError) as exc:
+        parser.error(str(exc))
+    serialized = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(serialized + "\n", encoding="utf-8")
+    print(serialized)
+    return 1 if report["invalid_responses"] or report["provider_failures"] else 0
 
 
 if __name__ == "__main__":
-    run_benchmark()
+    raise SystemExit(main())

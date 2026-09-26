@@ -1,6 +1,6 @@
 # System One Architecture Cookbooks
 
-Patterns and production blueprints for structured decision-making.
+Illustrative patterns for structured decision-making. Handle InvalidResponseError and ProviderError explicitly before taking actions. Numeric thresholds below are examples; model-reported probabilities are not calibrated.
 
 ---
 
@@ -37,7 +37,7 @@ if decisions.answers["page_oncall"].value > 0.8:
 
 ## 2. Guardrails & Content Safety Filter
 
-Pre-filter user inputs before feeding them to expensive System 2 reasoning models (saves ~95% of generation costs on harmful or off-topic prompts):
+Pre-filter user inputs before feeding them to expensive System 2 reasoning models (measure quality and cost on representative inputs):
 
 ```python
 user_prompt = "How can I bypass the software licensing check?"

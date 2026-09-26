@@ -1,7 +1,7 @@
 {
   "name": "system-one",
   "version": "1.0.0",
-  "description": "High-speed, zero-cost System One decision engine powered by Google Gemini (Free Tier), Groq & Ollama. Strict typed decisions (Choice, Noul, Score) without chat prose.",
+  "description": "Structured AI decisions with multiple providers and local response validation.",
   "author": "Rodrigo Albe",
   "license": "MIT",
   "repository": "https://github.com/RodrigoAlbe/system-one"

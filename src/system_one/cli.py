@@ -9,11 +9,19 @@ from .client import SystemOneClient
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: system-one <type: noul|choice|score> <state/text> [instructions] [options...]")
+        print(
+            "Usage: system-one <type: noul|choice|score> <state/text> [instructions] [options...]"
+        )
         print("Examples:")
-        print("  system-one noul 'User reported payout failure' 'Is this an urgent production bug?'")
-        print("  system-one choice 'Payment gateway 500 error' 'Department' Backend DevOps Support")
-        print("  system-one score 'Critical outage detected' 'Severity' Low Medium High Critical")
+        print(
+            "  system-one noul 'User reported payout failure' 'Is this an urgent production bug?'"
+        )
+        print(
+            "  system-one choice 'Payment gateway 500 error' 'Department' Backend DevOps Support"
+        )
+        print(
+            "  system-one score 'Critical outage detected' 'Severity' Low Medium High Critical"
+        )
         sys.exit(1)
 
     q_type = sys.argv[1].lower()

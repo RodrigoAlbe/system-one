@@ -1,11 +1,8 @@
-"""
-Mathematical calibration and logprobs extraction for System One decisions.
-Computes true probability distributions and entropy-based confidence from token logits.
-"""
+"""Token-level diagnostics, not calibrated decision probabilities."""
 
 from __future__ import annotations
 import math
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional
 
 
 def softmax(logprobs: Dict[str, float]) -> Dict[str, float]:
@@ -16,6 +13,8 @@ def softmax(logprobs: Dict[str, float]) -> Dict[str, float]:
     if not logprobs:
         return {}
 
+    if any(not math.isfinite(value) for value in logprobs.values()):
+        raise ValueError("logprobs must be finite")
     max_logp = max(logprobs.values())
     exp_vals = {k: math.exp(v - max_logp) for k, v in logprobs.items()}
     sum_exp = sum(exp_vals.values())
@@ -29,9 +28,9 @@ def softmax(logprobs: Dict[str, float]) -> Dict[str, float]:
 
 def entropy_confidence(probs: Dict[str, float]) -> float:
     """
-    Computes calibrated confidence based on normalized Shannon entropy:
+    Computes distribution concentration, not empirical correctness probability:
     Confidence = 1.0 - (Entropy / Max_Entropy)
-    
+
     Returns 1.0 if probability is concentrated in a single option,
     and 0.0 if distribution is completely uniform (maximum uncertainty).
     """
@@ -53,63 +52,48 @@ def entropy_confidence(probs: Dict[str, float]) -> float:
     return round(confidence, 4)
 
 
-def extract_openai_logprobs(choice_data: dict, target_tokens: Optional[List[str]] = None) -> Dict[str, float]:
-    """
-    Extracts token log probabilities from OpenAI / Groq / Ollama / vLLM response format.
-    Looks inside choice_data['logprobs']['content'].
-    """
-    logprobs_info = choice_data.get("logprobs", {})
-    if not logprobs_info:
+def _extract_position(steps, position, target_tokens, probability_field):
+    if not steps:
         return {}
-
-    content_tokens = logprobs_info.get("content", [])
-    raw_logprobs: Dict[str, float] = {}
-
-    for item in content_tokens:
-        top_items = item.get("top_logprobs", [])
-        for top in top_items:
-            tok = top.get("token", "").strip().strip('"').strip("'")
-            lp = float(top.get("logprob", -999.0))
-            if tok and (target_tokens is None or any(tok.lower() == t.lower() for t in target_tokens)):
-                # If target specified, match case-insensitively
-                match = tok
-                if target_tokens:
-                    for t in target_tokens:
-                        if tok.lower() == t.lower():
-                            match = t
-                            break
-                if match not in raw_logprobs or lp > raw_logprobs[match]:
-                    raw_logprobs[match] = lp
-
-    return raw_logprobs
+    if position is None:
+        if len(steps) != 1:
+            raise ValueError(
+                "Specify a token position; probabilities across positions cannot be pooled"
+            )
+        position = 0
+    if type(position) is not int or not 0 <= position < len(steps):
+        raise ValueError("Token position is out of range")
+    result = {}
+    for item in steps[position]:
+        token = item.get("token", "")
+        # Retain exact token text. Whitespace/quotes/case are part of token identity.
+        if target_tokens is None or token in target_tokens:
+            value = item[probability_field]
+            if type(value) not in (int, float) or not math.isfinite(value):
+                raise ValueError("Token log probability must be finite")
+            result[token] = float(value)
+    return result
 
 
-def extract_gemini_logprobs(candidate_data: dict, target_tokens: Optional[List[str]] = None) -> Dict[str, float]:
-    """
-    Extracts token log probabilities from Google Gemini API response format:
-    candidate_data['logprobsResult']['topCandidates'] or ['chosenCandidates'].
-    """
-    logprobs_res = candidate_data.get("logprobsResult", {})
-    if not logprobs_res:
-        return {}
+def extract_openai_logprobs(
+    choice_data: dict,
+    target_tokens: Optional[List[str]] = None,
+    *,
+    position: Optional[int] = None,
+) -> Dict[str, float]:
+    """Read alternatives at one token position; never combine different contexts."""
+    content = (choice_data.get("logprobs") or {}).get("content") or []
+    steps = [item.get("top_logprobs") or [] for item in content]
+    return _extract_position(steps, position, target_tokens, "logprob")
 
-    raw_logprobs: Dict[str, float] = {}
 
-    # Check chosenCandidates with topCandidates
-    chosen = logprobs_res.get("chosenCandidates", [])
-    for c in chosen:
-        top_candidates = c.get("topCandidates", [])
-        for top in top_candidates:
-            tok = top.get("token", "").strip().strip('"').strip("'")
-            lp = float(top.get("logProbability", -999.0))
-            if tok and (target_tokens is None or any(tok.lower() == t.lower() for t in target_tokens)):
-                match = tok
-                if target_tokens:
-                    for t in target_tokens:
-                        if tok.lower() == t.lower():
-                            match = t
-                            break
-                if match not in raw_logprobs or lp > raw_logprobs[match]:
-                    raw_logprobs[match] = lp
-
-    return raw_logprobs
+def extract_gemini_logprobs(
+    candidate_data: dict,
+    target_tokens: Optional[List[str]] = None,
+    *,
+    position: Optional[int] = None,
+) -> Dict[str, float]:
+    """Read Gemini topCandidates[position].candidates as token diagnostics."""
+    result = candidate_data.get("logprobsResult") or {}
+    steps = [item.get("candidates") or [] for item in result.get("topCandidates", [])]
+    return _extract_position(steps, position, target_tokens, "logProbability")

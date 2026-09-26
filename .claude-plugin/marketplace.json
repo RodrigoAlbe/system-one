@@ -4,8 +4,10 @@
     {
       "name": "system-one",
       "version": "1.0.0",
-      "description": "System One decision engine: typed probabilistic choices, scores, and guardrails without chat prose.",
-      "skills": ["skills/system-one"]
+      "description": "Structured choices, probabilities, and scores with local response validation.",
+      "skills": [
+        "skills/system-one"
+      ]
     }
   ]
 }

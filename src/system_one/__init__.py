@@ -1,7 +1,4 @@
-"""
-System One Native - Drop-in implementation of TypeSafe / Jev decision primitives.
-Fast, structured, calibrated decisions with zero-cost free tier options.
-"""
+"""Structured AI decisions with local response validation."""
 
 from .primitives import (
     Choice,
@@ -12,11 +9,21 @@ from .primitives import (
     EvaluationResponse,
 )
 from .client import SystemOneClient
+from .errors import (
+    InvalidResponseError,
+    ProviderRefusalError,
+    IncompleteResponseError,
+    ProviderError,
+)
 from .logprobs import softmax, entropy_confidence
 
 __version__ = "1.1.0"
 __all__ = [
     "SystemOneClient",
+    "InvalidResponseError",
+    "ProviderRefusalError",
+    "IncompleteResponseError",
+    "ProviderError",
     "Choice",
     "Noul",
     "Score",
@@ -26,4 +33,3 @@ __all__ = [
     "softmax",
     "entropy_confidence",
 ]
-

@@ -54,7 +54,7 @@ Set `GEMINI_API_KEY`, or select a different provider explicitly.
 ```python
 from system_one import SystemOneClient, Choice, Noul, Score
 
-client = SystemOneClient(provider="gemini")
+client = SystemOneClient(provider="gemini")  # Close after all evaluations.
 response = client.evaluate(
     state={"message": "Payment gateway returning 500 errors", "plan": "Enterprise"},
     questions={
@@ -78,9 +78,11 @@ Convenience methods and async evaluation use the same validation:
 category = client.choice("I love it", "Sentiment", ["Positive", "Neutral", "Negative"])
 probability = client.noul("Unsolicited sales email", "Is this spam?")
 priority = client.score("Disk almost full", "Severity", ["Low", "Medium", "High"])
+client.close()
 
 # Inside an async function:
-# response = await client.evaluate_async("log payload", {"alert": Noul("Page on-call?")})
+# async with SystemOneClient(provider="gemini") as async_client:
+#     response = await async_client.evaluate_async("log payload", {"alert": Noul("Page on-call?")})
 ```
 
 ## Validation and failure handling
@@ -111,7 +113,38 @@ negative answers. Invalid responses are not automatically retried.
 HTTP 408/429/500/502/503/504 and transport failures are retried with backoff,
 respecting `Retry-After`. `max_retries=3` retains its historical meaning of **three
 total attempts**. `timeout` is an HTTP operation timeout, not a total deadline;
-retries and provider-requested waits can increase overall latency.
+`total_timeout=35.0` is the evaluation budget shared by all attempts and waits.
+A retry wait that cannot fit fails immediately with `EvaluationTimeoutError`
+(a `ProviderError`) so the caller can reschedule without violating `Retry-After`.
+Async HTTP I/O is cancelled at the remaining deadline. **Sync deadlines are
+cooperative**: each HTTP phase is limited to the remaining budget and overdue
+results are rejected, but an in-flight synchronous request cannot be interrupted
+at an exact wall-clock deadline. Use async evaluation when cancellation at a
+deadline is required. Synchronous preparation/parsing and event-loop scheduling
+also mean this is not a hard real-time guarantee.
+
+Clients now keep connection pools. Use `with SystemOneClient(...) as client` for
+sync calls and `async with SystemOneClient(...) as client` for async calls, or
+call `close()` / `await aclose()` explicitly. Reuse async clients within one event
+loop; close them before that loop exits. A closed client cannot be reused.
+If both APIs were used, `await aclose()` closes both pools. Do not close a client
+while evaluations are in flight. Convenience methods use these same pools.
+
+`ProviderError` exposes `provider`, `status_code`, `retryable`, `retry_after`
+(seconds or `None`), `attempts`, and `request_id` (when available). Error messages
+omit provider response bodies. `retryable` describes the failure, not a promise
+that another attempt will succeed; authentication errors are not retryable.
+
+```python
+from system_one import SystemOneClient, Noul, EvaluationTimeoutError
+
+with SystemOneClient(provider="gemini", total_timeout=10) as client:
+    try:
+        result = client.evaluate("service unavailable", {"outage": Noul("Is there an outage?")})
+    except EvaluationTimeoutError as exc:
+        print("Queue for later", exc.retry_after, exc.attempts)
+```
+
 
 ## Providers and response formats
 
@@ -210,7 +243,18 @@ Noul Brier score. Noul accuracy uses a 0.5 threshold. Repetitions do not increas
 the number of independent cases. A representative, independently reviewed dataset
 is still needed before claiming real-world quality or calibrated confidence.
 
-## Migration from 1.1.0 behavior
+## Migration to 2.0.0
+
+Version 2.0.0 includes the validation changes below and these additional changes:
+
+- Evaluations default to a 35-second total budget; configure `total_timeout` for
+  longer tasks. Long retry waits fail promptly instead of sleeping unboundedly.
+- Clients own persistent connection pools and must be closed explicitly.
+- `entropy_confidence` rejects empty, non-finite, negative and unnormalized
+  distributions; `softmax` preserves full precision instead of rounding each value.
+- `ProviderError` carries structured diagnostics; `EvaluationTimeoutError` is new.
+
+### Changes from the original 1.1.0 behavior
 
 - Invalid or missing answers now raise errors instead of becoming default values.
 - Logprobs are disabled by default and no longer rewrite values or confidence.
@@ -241,6 +285,14 @@ With `--json`, stdout contains `answers` (the single question ID is `q`) and
 arguments exit 2 with argparse diagnostics on stderr. Evaluation/configuration
 failures exit 1 with a short error on stderr (a JSON `error` object when `--json`
 is set), leaving stdout empty.
+
+## Decision-quality evaluation
+
+Start with [the evaluation protocol](docs/evaluation.md) and the synthetic,
+explicitly labeled [triage fixture](examples/triage.synthetic.json). These cases
+exercise the workflow; they are not customer data, independent evidence, or a
+production quality claim. The protocol defines a manual-review outcome and the
+real held-out dataset required before enabling automated actions.
 
 ## License
 

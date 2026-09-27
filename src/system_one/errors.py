@@ -15,3 +15,26 @@ class IncompleteResponseError(InvalidResponseError):
 
 class ProviderError(RuntimeError):
     """A transport error or unsuccessful HTTP response prevented evaluation."""
+
+    def __init__(
+        self,
+        message,
+        *,
+        provider=None,
+        status_code=None,
+        retryable=False,
+        retry_after=None,
+        attempts=0,
+        request_id=None,
+    ):
+        super().__init__(message)
+        self.provider = provider
+        self.status_code = status_code
+        self.retryable = retryable
+        self.retry_after = retry_after
+        self.attempts = attempts
+        self.request_id = request_id
+
+
+class EvaluationTimeoutError(ProviderError):
+    """The evaluation exhausted its budget or cannot fit the next retry wait."""

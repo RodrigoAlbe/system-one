@@ -23,7 +23,7 @@ def softmax(logprobs: Dict[str, float]) -> Dict[str, float]:
         uniform = 1.0 / len(logprobs)
         return {k: uniform for k in logprobs}
 
-    return {k: round(v / sum_exp, 4) for k, v in exp_vals.items()}
+    return {k: v / sum_exp for k, v in exp_vals.items()}
 
 
 def entropy_confidence(probs: Dict[str, float]) -> float:
@@ -34,6 +34,13 @@ def entropy_confidence(probs: Dict[str, float]) -> float:
     Returns 1.0 if probability is concentrated in a single option,
     and 0.0 if distribution is completely uniform (maximum uncertainty).
     """
+    if not probs or any(
+        type(p) not in (int, float) or not math.isfinite(p) or not 0 <= p <= 1
+        for p in probs.values()
+    ):
+        raise ValueError("probabilities must be a non-empty finite distribution")
+    if not math.isclose(math.fsum(probs.values()), 1.0, rel_tol=1e-6, abs_tol=1e-9):
+        raise ValueError("probabilities must sum to 1")
     n = len(probs)
     if n <= 1:
         return 1.0

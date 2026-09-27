@@ -3,3 +3,4 @@ include scripts/check_wheel_install.py
 include CHANGELOG.md
 recursive-include docs *.md
 recursive-include examples *.json
+include scripts/validate_independent.py

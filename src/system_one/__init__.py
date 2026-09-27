@@ -14,16 +14,18 @@ from .errors import (
     ProviderRefusalError,
     IncompleteResponseError,
     ProviderError,
+    EvaluationTimeoutError,
 )
 from .logprobs import softmax, entropy_confidence
 
-__version__ = "1.1.0"
+__version__ = "2.0.0"
 __all__ = [
     "SystemOneClient",
     "InvalidResponseError",
     "ProviderRefusalError",
     "IncompleteResponseError",
     "ProviderError",
+    "EvaluationTimeoutError",
     "Choice",
     "Noul",
     "Score",

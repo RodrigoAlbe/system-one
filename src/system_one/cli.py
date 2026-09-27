@@ -52,7 +52,10 @@ def main(argv=None) -> int:
 
     try:
         client = SystemOneClient(provider=args.provider, model=args.model)
-        result = client.evaluate(args.state, {"q": question})
+        try:
+            result = client.evaluate(args.state, {"q": question})
+        finally:
+            client.close()
     except (InvalidResponseError, ProviderError, ValueError) as exc:
         if args.json_output:
             print(

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "system-one-native"
-version = "1.1.0"
+version = "2.0.0"
 description = "Structured AI decisions with multiple providers and local response validation."
 readme = "README.md"
 authors = [

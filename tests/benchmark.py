@@ -221,6 +221,7 @@ def run_benchmark(client, cases=None, repeats=1):
         "model": client.model,
         "response_mode": client.capabilities.response_mode,
         "timeout": client.timeout,
+        "total_timeout": getattr(client, "total_timeout", None),
         "max_attempts": client.max_retries,
         "use_logprobs": client.use_logprobs,
         "temperature": 0.0,
@@ -281,11 +282,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         cases = load_cases(args.dataset) if args.dataset else BENCHMARK_CASES
-        report = run_benchmark(
-            SystemOneClient(provider=args.provider, model=args.model),
-            cases,
-            args.repeat,
-        )
+        with SystemOneClient(provider=args.provider, model=args.model) as client:
+            report = run_benchmark(client, cases, args.repeat)
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
     serialized = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)

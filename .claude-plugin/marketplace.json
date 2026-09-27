@@ -1,13 +1,15 @@
 {
   "name": "system-one",
+  "description": "System One skills for structured AI decisions and local response validation.",
+  "owner": {
+    "name": "Rodrigo Albe"
+  },
   "plugins": [
     {
       "name": "system-one",
-      "version": "1.0.0",
-      "description": "Structured choices, probabilities, and scores with local response validation.",
-      "skills": [
-        "skills/system-one"
-      ]
+      "source": "./",
+      "version": "1.1.0",
+      "description": "Structured choices, probabilities, and scores with local response validation."
     }
   ]
 }

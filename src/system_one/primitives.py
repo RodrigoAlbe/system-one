@@ -87,9 +87,9 @@ class EvaluationMetrics:
     """Telemetry and cost metrics for the evaluation."""
 
     latency_ms: float
-    input_tokens: int
-    output_tokens: int
-    total_tokens: int
+    input_tokens: Optional[int]
+    output_tokens: Optional[int]
+    total_tokens: Optional[int]
     estimated_cost_usd: Optional[float]
     provider: str
     model: str

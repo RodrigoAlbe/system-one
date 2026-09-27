@@ -1,50 +1,94 @@
-"""
-Command-line interface for System One decisions.
-"""
+"""Command-line interface for validated System One decisions."""
 
 from __future__ import annotations
+
+import argparse
+import json
 import sys
+from dataclasses import asdict
+
 from .client import SystemOneClient
+from .errors import InvalidResponseError, ProviderError
+from .primitives import Choice, Noul, Score
 
 
-def main():
-    if len(sys.argv) < 3:
-        print(
-            "Usage: system-one <type: noul|choice|score> <state/text> [instructions] [options...]"
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="system-one",
+        description="Evaluate a structured decision. Choice/score require explicit options/levels.",
+    )
+    parser.add_argument("type", choices=("noul", "choice", "score"))
+    parser.add_argument("state", help="Text to evaluate")
+    parser.add_argument(
+        "instructions", nargs="?", default="Evaluate the provided state"
+    )
+    parser.add_argument(
+        "options", nargs="*", help="Allowed choices or ordered score levels"
+    )
+    parser.add_argument("--provider", choices=("gemini", "groq", "openai", "ollama"))
+    parser.add_argument("--model", help="Override the provider's default model")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Print answers and metrics as JSON; raw provider data is omitted",
+    )
+    args = parser.parse_intermixed_args(argv)
+    if args.type in ("choice", "score") and not args.options:
+        parser.error(
+            f"{args.type} requires instructions and at least one explicit option/level"
         )
-        print("Examples:")
-        print(
-            "  system-one noul 'User reported payout failure' 'Is this an urgent production bug?'"
-        )
-        print(
-            "  system-one choice 'Payment gateway 500 error' 'Department' Backend DevOps Support"
-        )
-        print(
-            "  system-one score 'Critical outage detected' 'Severity' Low Medium High Critical"
-        )
-        sys.exit(1)
+    if args.type == "noul" and args.options:
+        parser.error("noul does not accept options/levels")
+    try:
+        if args.type == "choice":
+            question = Choice(options=args.options, instructions=args.instructions)
+        elif args.type == "score":
+            question = Score(levels=args.options, instructions=args.instructions)
+        else:
+            question = Noul(instructions=args.instructions)
+    except ValueError as exc:
+        parser.error(str(exc))
 
-    q_type = sys.argv[1].lower()
-    state = sys.argv[2]
-    instr = sys.argv[3] if len(sys.argv) > 3 else "Evaluate the provided state"
+    try:
+        client = SystemOneClient(provider=args.provider, model=args.model)
+        result = client.evaluate(args.state, {"q": question})
+    except (InvalidResponseError, ProviderError, ValueError) as exc:
+        if args.json_output:
+            print(
+                json.dumps(
+                    {"error": {"type": type(exc).__name__, "message": str(exc)}},
+                    ensure_ascii=False,
+                ),
+                file=sys.stderr,
+            )
+        else:
+            print(f"system-one: {exc}", file=sys.stderr)
+        return 1
 
-    client = SystemOneClient()
-
-    if q_type == "noul":
-        prob = client.noul(state, instr)
-        print(f"Probability (True/Yes): {prob:.2f}")
-    elif q_type == "choice":
-        options = sys.argv[4:] if len(sys.argv) > 4 else ["Option_A", "Option_B"]
-        selected = client.choice(state, instr, options)
-        print(f"Selected: {selected}")
-    elif q_type == "score":
-        levels = sys.argv[4:] if len(sys.argv) > 4 else ["Low", "Medium", "High"]
-        lvl = client.score(state, instr, levels)
-        print(f"Score Level: {lvl}")
+    if args.json_output:
+        print(
+            json.dumps(
+                {
+                    "answers": {
+                        key: asdict(answer) for key, answer in result.answers.items()
+                    },
+                    "metrics": asdict(result.metrics),
+                },
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+        )
     else:
-        print(f"Unknown question type: {q_type}")
-        sys.exit(1)
+        value = result.answers["q"].value
+        if args.type == "noul":
+            print(f"Probability (True/Yes): {value:.2f}")
+        elif args.type == "choice":
+            print(f"Selected: {value}")
+        else:
+            print(f"Score Level: {value}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

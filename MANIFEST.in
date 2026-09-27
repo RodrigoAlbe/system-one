@@ -1,1 +1,2 @@
 include tests/benchmark.py
+include scripts/check_wheel_install.py

@@ -176,7 +176,8 @@ def run_benchmark(client, cases=None, repeats=1):
     ).hexdigest()
     records, latencies, brier = [], [], []
     correct, labeled, attempted_labels, valid, invalid, failures = 0, 0, 0, 0, 0, 0
-    input_tokens, output_tokens, total_tokens = 0, 0, 0
+    token_fields = ("input_tokens", "output_tokens", "total_tokens")
+    reported_tokens = {field: [] for field in token_fields}
     for repeat in range(repeats):
         for case in cases:
             record = {"case_id": case["id"], "repeat": repeat + 1}
@@ -191,9 +192,10 @@ def run_benchmark(client, cases=None, repeats=1):
             else:
                 valid += 1
                 latencies.append(result.metrics.latency_ms)
-                input_tokens += result.metrics.input_tokens
-                output_tokens += result.metrics.output_tokens
-                total_tokens += result.metrics.total_tokens
+                for field in token_fields:
+                    value = getattr(result.metrics, field)
+                    if value is not None:
+                        reported_tokens[field].append(value)
                 record.update(
                     status="ok",
                     metrics=asdict(result.metrics),
@@ -234,9 +236,25 @@ def run_benchmark(client, cases=None, repeats=1):
         "successful_latency_p95_ms": ordered[math.ceil(0.95 * len(ordered)) - 1]
         if ordered
         else None,
-        "successful_input_tokens": input_tokens,
-        "successful_output_tokens": output_tokens,
-        "successful_total_tokens": total_tokens,
+        # Complete totals remain unknown if even one successful response omitted a field.
+        **{
+            f"successful_{field}": sum(values)
+            if valid and len(values) == valid
+            else None
+            for field, values in reported_tokens.items()
+        },
+        **{
+            f"reported_{field}": sum(values) if values else None
+            for field, values in reported_tokens.items()
+        },
+        "token_usage_coverage": {
+            field: {
+                "reported_responses": len(values),
+                "missing_responses": valid - len(values),
+                "fraction": len(values) / valid if valid else None,
+            }
+            for field, values in reported_tokens.items()
+        },
         "estimated_cost_usd": None,
         "labeled_answers": labeled,
         "attempted_labeled_answers": attempted_labels,
